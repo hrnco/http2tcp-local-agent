@@ -171,7 +171,7 @@ Cykloon — https://www.cykloon.com/
 
 Trialexa — https://trialexa.com/
 
-za podporu a umožnenie otvorenia projektu ako open-source.
+za konzultácie, podporu a umožnenie otvorenia projektu ako open-source.
 
 ## Licencia
 
