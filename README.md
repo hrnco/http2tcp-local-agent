@@ -125,7 +125,7 @@ Re-párovanie agenta je možné len manuálnym zásahom (napr. vymazaním lokál
 Odporúčaný spôsob spustenia:
 
 ```bash
-docker run -d   --restart=unless-stopped   --name http2tcp-agent   -p 127.0.0.1:34279:80   hrnco/http2tcp-local-agent
+docker run -d --restart=unless-stopped --name http2tcp-agent -p 127.0.0.1:34279:80 hrnco/http2tcp-local-agent
 ```
 
 Po spustení je agent dostupný na:
