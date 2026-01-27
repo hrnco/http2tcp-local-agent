@@ -1,6 +1,6 @@
 # HTTP2TCP Local Agent
 
-`hrnco/http2tcp-local-agent` je ľahký lokálny HTTP server bežiaci v Dockeri, ktorý umožňuje webovým alebo cloudovým aplikáciám bezpečne komunikovať so zariadeniami v LAN cez TCP – bez potreby otvárať porty, nastavovať VPN alebo exposeovať LAN smerom do internetu.
+`hrnco/http2tcp-local-agent` je ľahký lokálny HTTP server bežiaci v Dockeri, ktorý umožňuje webovým alebo cloudovým aplikáciám bezpečne komunikovať so zariadeniami v LAN cez TCP – bez potreby otvárať porty, nastavovať VPN alebo exponovať LAN smerom do internetu.
 
 Hlavná idea:
 
@@ -14,16 +14,16 @@ Cloud tak nikdy nepotrebuje priamy prístup do vnútornej siete zákazníka.
 
 HTTP2TCP Local Agent funguje ako:
 
-- **HTTP server na localhoste** – prijíma požiadavky z browsera alebo lokálneho klienta
-- **TCP klient do LAN** – nadväzuje outbound TCP spojenia na zariadenia v lokálnej sieti (tlačiarne, pokladnice, terminály, IoT…)
-- **kryptograficky párovaný agent** – po inicializácii komunikuje so svojou webovou aplikáciou výhradne šifrovane a autorizovane
+- **HTTP server na localhoste** – prijíma požiadavky z prehliadača alebo lokálneho klienta
+- **TCP klient do LAN** – nadväzuje výstupné TCP spojenia na zariadenia v lokálnej sieti (tlačiarne, pokladnice, terminály, IoT…)
+- **kryptograficky párovaný agent** – pri inicializácii prijme verejný kľúč webovej aplikácie a následne komunikuje výhradne šifrovane a autorizovane s touto aplikáciou
 
 Typické LAN zariadenia:
 
 - ESC/POS LAN tlačiarne (port 9100)
 - ZPL etikety (Zebra, port 9100)
 - fiskálne pokladnice (napr. FiskalPRO API na porte 3000)
-- špecializované TCP zariadenia (scannery, IoT gatewaye…)
+- špecializované TCP zariadenia (skenery, IoT gatewaye…)
 
 ---
 
@@ -32,7 +32,7 @@ Typické LAN zariadenia:
 - Cloudový fakturačný/POS systém, ktorý potrebuje tlačiť účtenky na lokálnej tlačiarni
 - Webová aplikácia, ktorá musí komunikovať s LAN pokladnicou cez proprietárny TCP protokol
 - Centrálne webové UI (na vzdialenom serveri), ktoré riadi lokálne TCP zariadenia bez VPN
-- Situácie, kde IT oddelenie nedovolí otvárať porty ani nastavovať port-forwarding, ale povoľuje bežný outbound HTTP/HTTPS
+- Situácie, kde IT oddelenie nedovolí otvárať porty ani nastavovať port-forwarding, ale povoľuje bežný výstupný HTTP/HTTPS
 
 ---
 
@@ -40,8 +40,8 @@ Typické LAN zariadenia:
 
 Tok komunikácie:
 
-1. **Cloud / Web aplikácia** – beží na vzdialenom serveri, komunikuje cez HTTPS s browserom
-2. **Browser (používateľ)** – vykonáva JavaScript, ktorý posiela požiadavky na `http://localhost:<port>`
+1. **Cloud / Web aplikácia** – beží na vzdialenom serveri, komunikuje cez HTTPS s prehliadačom
+2. **Prehliadač (používateľ)** – vykonáva JavaScript, ktorý posiela požiadavky na `http://localhost:<port>`
 3. **HTTP2TCP Local Agent** – prijíma HTTP požiadavky a podľa konfigurácie nadväzuje TCP spojenia do LAN
 4. **LAN zariadenia** – tlačiarne, pokladnice, terminály a iné TCP zariadenia
 
@@ -72,18 +72,18 @@ HTTP2TCP Local Agent
 HTTP2TCP Local Agent je navrhnutý tak, aby:
 
 - bežal typicky na `127.0.0.1:<port>` (nie je dostupný zo siete)
-- používal len **outbound** TCP spojenia smerom do LAN
+- používal len **výstupné** TCP spojenia smerom do LAN
 - nikdy neotváral priamy prístup do LAN pre internet
 - fungoval aj za „striktnejším firewallom“, ktorý povoľuje len:
-  - outbound HTTPS pre prehliadač
-  - lokálnu komunikáciu na `localhost`
-  - internú komunikáciu v LAN
+    - výstupný HTTPS pre prehliadač
+    - lokálnu komunikáciu na `localhost`
+    - internú komunikáciu v LAN
 
 Nie je potrebný:
 
 - port-forwarding
 - verejná IP adresa
-- inbound pravidlá vo firewalle
+- vstupné pravidlá vo firewalle
 - VPN prístup do siete zákazníka
 
 ### Kryptografická inicializácia
@@ -96,16 +96,16 @@ Po prvom spustení:
 
 1. Agent čaká na **jednorazovú inicializačnú požiadavku**
 2. Webová aplikácia poskytne:
-   - IP adresu zariadenia v LAN
-   - TCP port zariadenia
-   - svoj **public key**
+    - IP adresu zariadenia v LAN
+    - TCP port zariadenia
+    - svoj **verejný kľúč**
 3. Agent:
-   - vygeneruje vlastný **private key** (zostáva len lokálne)
-   - vytvorí alebo odvodí **session key**
-   - uloží konfiguráciu a párovanie lokálne
-   - prepne sa do „encrypted-only“ režimu
+    - vygeneruje vlastný **súkromný kľúč** (zostáva len lokálne) a poskytne webovej časti verejný kľúč
+    - vytvorí alebo odvodí **session key**
+    - uloží konfiguráciu a párovanie lokálne
+    - prepne sa do „encrypted-only“ režimu
 
-Public key nie je citlivý, preto bootstrap môže prebiehať bez šifrovania.
+Keďže verejný kľúč nie je citlivý, úvodná inicializácia môže prebiehať bez šifrovania.
 
 #### 2. Prevádzková (encrypted-only) fáza
 
@@ -120,16 +120,12 @@ Re-párovanie agenta je možné len manuálnym zásahom (napr. vymazaním lokál
 
 ---
 
-## Rýchly štарт (Docker)
+## Rýchly štart (Docker)
 
 Odporúčaný spôsob spustenia:
 
 ```bash
-docker run -d \
-  --restart=unless-stopped \
-  --name http2tcp-agent \
-  -p 127.0.0.1:34279:80 \
-  hrnco/http2tcp-local-agent
+docker run -d   --restart=unless-stopped   --name http2tcp-agent   -p 127.0.0.1:34279:80   hrnco/http2tcp-local-agent
 ```
 
 Po spustení je agent dostupný na:
@@ -148,31 +144,7 @@ V produkčnom prostredí sa odporúča:
 
 ## Základný princíp API
 
-Presná špecifikácia API môže byť predmetom ďalšej dokumentácie, ale základný princíp je:
-
-- **Inicializačné volanie** – párovanie agenta s webovou aplikáciou (konfigurácia IP/port a public key)
-- **Prevádzkové volania** – odosielanie šifrovaných požiadaviek, ktoré agent rozbalí a prevedie na TCP komunikáciu
-
-Príklad konceptu prevádzkovej požiadavky (ilustratívne):
-
-```
-POST /tcp/send HTTP/1.1
-Host: localhost:34279
-Content-Type: application/json
-
-{
-  "ip": "192.168.1.50",
-  "port": 9100,
-  "payload_base64": "SGVsbG8gV29ybGQK..."
-}
-```
-
-Agent:
-
-1. dekóduje/overí šifrovanie a podpis podľa dohodnutého protokolu
-2. otvorí TCP spojenie na `ip:port`
-3. odošle binárny payload
-4. vráti odpoveď v Base64
+Bude doplnené.
 
 ---
 
@@ -189,7 +161,18 @@ Je to **špecializovaný, lokálny, kryptograficky párovaný agent** na bezpeč
 
 ---
 
+## Poďakovanie
+
+Tento projekt vznikol ako reakcia na konkrétnu potrebu zákazníka v oblasti komunikácie s LAN zariadeniami.
+
+Ďakujeme spoločnostiam:
+
+Cykloon — https://www.cykloon.com/
+
+Trialexa — https://trialexa.com/
+
+za podporu a umožnenie otvorenia projektu ako open-source.
+
 ## Licencia
 
 Bude doplnené.
-
