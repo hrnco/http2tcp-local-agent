@@ -119,6 +119,12 @@ Agent odmietne staré požiadavky.
 
 ---
 
+### Tipy
+
+- for higher security, restrict LAN device access to the agent IP using firewall or VLAN rules
+
+---
+
 ## Key management
 
 ### Server keyring
