@@ -1,0 +1,17 @@
+services:
+  agent:
+    build:
+      target: DEV
+      context: .
+      dockerfile: .docker/Dockerfile
+#    environment:
+#      HTTP2TCP_CORS_ALLOW_ORIGIN: ${HTTP2TCP_CORS_ALLOW_ORIGIN:-*}
+#      HTTP2TCP_DOCS_URL: ${HTTP2TCP_DOCS_URL:-https://github.com/hrnco/http2tcp-local-agent}
+    ports:
+      - "34279:80"
+    volumes:
+      - ./:/var/www/html:ro
+      - ./.docker/apache/000-default.conf:/etc/apache2/sites-available/000-default.conf:ro
+    restart: unless-stopped
+#    extra_hosts:
+#      - "host.docker.internal:host-gateway"

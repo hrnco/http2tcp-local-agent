@@ -3,6 +3,8 @@ FROM php:8.4-apache AS base
 ENV HTTP2TCP_CORS_ALLOW_ORIGIN="*"
 ENV HTTP2TCP_DOCS_URL="https://github.com/hrnco/http2tcp-local-agent"
 
+COPY ./.docker/apache/000-default.conf /etc/apache2/sites-available/000-default.conf
+
 FROM base AS prebuild
 
 ENV COMPOSER_ALLOW_SUPERUSER=1
