@@ -10,7 +10,7 @@ services:
     ports:
       - "34279:80"
     volumes:
-      - ./:/var/www/html:ro
+      - ./:/var/www/html
       - ./.docker/apache/000-default.conf:/etc/apache2/sites-available/000-default.conf:ro
     restart: unless-stopped
 #    extra_hosts:
