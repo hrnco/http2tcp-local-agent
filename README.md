@@ -4,9 +4,9 @@
 
 Hlavná idea:
 
-> Cloud / Web → Browser → http://localhost:<port> → HTTP2TCP Local Agent → TCP → LAN zariadenie
+> Cloud / Web App → http2tcp-server (crypto/signing) → Browser → http://localhost:<port> → HTTP2TCP Local Agent → TCP → LAN zariadenie
 
-Cloud tak nikdy nepotrebuje priamy prístup do vnútornej siete zákazníka.
+Cloud nikdy nepotrebuje priamy prístup do vnútornej siete zákazníka.
 
 ---
 
@@ -16,7 +16,15 @@ HTTP2TCP Local Agent funguje ako:
 
 - **HTTP server na localhoste** – prijíma požiadavky z prehliadača alebo lokálneho klienta
 - **TCP klient do LAN** – nadväzuje výstupné TCP spojenia na zariadenia v lokálnej sieti (tlačiarne, pokladnice, terminály, IoT…)
-- **kryptograficky párovaný agent** – pri inicializácii prijme verejný kľúč webovej aplikácie a následne komunikuje výhradne šifrovane a autorizovane s touto aplikáciou
+- **kryptograficky overujúci agent** – akceptuje iba serverom podpísané (a voliteľne šifrované) požiadavky
+
+Doplnková serverová časť (`http2tcp-server`) slúži ako:
+
+- držiteľ private key
+- podpisový / šifrovací modul
+- prekladač aplikačných požiadaviek do kryptograficky autorizovanej podoby
+
+Server **nekomunikuje priamo s agentom** – agent komunikuje iba s browserom na localhoste.
 
 Typické LAN zariadenia:
 
@@ -31,8 +39,8 @@ Typické LAN zariadenia:
 
 - Cloudový fakturačný/POS systém, ktorý potrebuje tlačiť účtenky na lokálnej tlačiarni
 - Webová aplikácia, ktorá musí komunikovať s LAN pokladnicou cez proprietárny TCP protokol
-- Centrálne webové UI (na vzdialenom serveri), ktoré riadi lokálne TCP zariadenia bez VPN
-- Situácie, kde IT oddelenie nedovolí otvárať porty ani nastavovať port-forwarding, ale povoľuje bežný výstupný HTTP/HTTPS
+- Centrálne webové UI, ktoré riadi lokálne TCP zariadenia bez VPN
+- Prostredia, kde IT oddelenie nedovolí otvárať porty ani nastavovať port-forwarding
 
 ---
 
@@ -40,15 +48,21 @@ Typické LAN zariadenia:
 
 Tok komunikácie:
 
-1. **Cloud / Web aplikácia** – beží na vzdialenom serveri, komunikuje cez HTTPS s prehliadačom
-2. **Prehliadač (používateľ)** – vykonáva JavaScript, ktorý posiela požiadavky na `http://localhost:<port>`
-3. **HTTP2TCP Local Agent** – prijíma HTTP požiadavky a podľa konfigurácie nadväzuje TCP spojenia do LAN
-4. **LAN zariadenia** – tlačiarne, pokladnice, terminály a iné TCP zariadenia
+1. **Cloud / Web aplikácia** požiada server o podpísanú/šifrovanú požiadavku
+2. **http2tcp-server** vytvorí kryptografickú obálku (signature/encryption)
+3. **Browser (JS)** pošle túto obálku na `http://localhost:<port>`
+4. **HTTP2TCP Local Agent** overí podpis a vykoná TCP operáciu
+5. **LAN zariadenie** spracuje TCP komunikáciu
 
 Schematicky:
 
 ```
 Cloud / Web App
+        |
+        |  HTTPS
+        v
+ http2tcp-server
+ (signing/encryption)
         |
         |  HTTPS
         v
@@ -67,56 +81,81 @@ HTTP2TCP Local Agent
 
 ## Bezpečnostný model
 
-### Sieťový model
+### Digitálny podpis
 
-HTTP2TCP Local Agent je navrhnutý tak, aby:
+Každá požiadavka je podpísaná private key servera.
 
-- bežal typicky na `127.0.0.1:<port>` (nie je dostupný zo siete)
-- používal len **výstupné** TCP spojenia smerom do LAN
-- nikdy neotváral priamy prístup do LAN pre internet
-- fungoval aj za „striktnejším firewallom“, ktorý povoľuje len:
-    - výstupný HTTPS pre prehliadač
-    - lokálnu komunikáciu na `localhost`
-    - internú komunikáciu v LAN
+Agent overuje podpis pomocou uloženého server public key.
 
-Nie je potrebný:
+Podpis je povinný vždy – aj pri nešifrovanom payload-e.
 
-- port-forwarding
-- verejná IP adresa
-- vstupné pravidlá vo firewalle
-- VPN prístup do siete zákazníka
+---
 
-### Kryptografická inicializácia
+### Trust On First Use (TOFU)
 
-Bezpečnosť je postavená na dvojfázovom procese:
+Pri prvom spojení:
 
-#### 1. Inicializačná (bootstrap) fáza
+1. Server pošle svoj public key
+2. Agent si ho uloží (pinning)
+3. Od tej chvíle dôveruje iba tomuto kľúču
 
-Po prvom spustení:
+Ak sa kľúč zmení, agent požiadavky odmietne.
 
-1. Agent čaká na **jednorazovú inicializačnú požiadavku**
-2. Webová aplikácia poskytne:
-    - IP adresu zariadenia v LAN
-    - TCP port zariadenia
-    - svoj **verejný kľúč**
-3. Agent:
-    - vygeneruje vlastný **súkromný kľúč** (zostáva len lokálne) a poskytne webovej časti verejný kľúč
-    - vytvorí alebo odvodí **session key**
-    - uloží konfiguráciu a párovanie lokálne
-    - prepne sa do „encrypted-only“ režimu
+---
 
-Keďže verejný kľúč nie je citlivý, úvodná inicializácia môže prebiehať bez šifrovania.
+### Ochrana proti replay útokom
 
-#### 2. Prevádzková (encrypted-only) fáza
+Každá požiadavka obsahuje timestamp. 
 
-Po úspešnej inicializácii:
+Agent odmietne staré požiadavky.
 
-- agent prestane akceptovať nešifrované alebo „nepárované“ požiadavky
-- komunikuje iba s webovou aplikáciou, ktorá dokáže používať dohodnutý kryptografický mechanizmus
-- všetky payloady sú šifrované (E2E medzi webom a agentom)
-- do LAN odchádzajú len RAW TCP dáta (agent ich neinterpretuje)
+---
 
-Re-párovanie agenta je možné len manuálnym zásahom (napr. vymazaním lokálnej konfigurácie).
+### Payload
+
+- payload nie je šifrovaný
+- je podpísaný
+- zaručuje integritu a autentickosť
+
+---
+
+## Key management
+
+### Server keyring
+
+Server môže mať viac private key (`key_id`):
+
+- per zákazník
+- per tenant
+- per zariadenie
+
+To umožňuje izoláciu a rotáciu.
+
+---
+
+### Uloženie kľúčov
+
+Private keys nie sú súčasťou Docker image.
+
+Odporúčané možnosti:
+
+- Docker volume
+- databáza + šifrovanie at-rest
+- Vault / KMS
+
+Kľúče prežijú recreate kontajnera.
+
+---
+
+### Rotácia kľúčov
+
+Agent môže akceptovať viac public key naraz.
+
+Postup:
+
+1. odstrániť starý private key zo servera
+2. odparovat agenta zo starym klucom
+3. server autoamticky vytvori novy private key a agent, kedze nie je sparovany sa automaticky sparuje
 
 ---
 
@@ -134,17 +173,12 @@ Po spustení je agent dostupný na:
 http://localhost:34279
 ```
 
-V produkčnom prostredí sa odporúča:
-
-- viazať sa len na `127.0.0.1`
-- používať fixný port (napr. 34279)
-- neinzerovať endpoint do LAN
-
 ---
 
 ## Základný princíp API
 
-Bude doplnené.
+Server vracia kryptograficky autorizovanú obálku, ktorú browser pošle agentovi.  
+Špecifikácia formátu bude doplnená.
 
 ---
 
@@ -157,7 +191,7 @@ HTTP2TCP Local Agent nie je:
 - SSH náhrada
 - nástroj na vzdialenú správu PC
 
-Je to **špecializovaný, lokálny, kryptograficky párovaný agent** na bezpečné TCP operácie, riadené webovou aplikáciou.
+Je to **špecializovaný, lokálny, kryptograficky overujúci agent** na bezpečné TCP operácie.
 
 ---
 
@@ -172,6 +206,8 @@ Cykloon — https://www.cykloon.com/
 Trialexa — https://trialexa.com/
 
 za konzultácie, podporu a umožnenie otvorenia projektu ako open-source.
+
+---
 
 ## Licencia
 
