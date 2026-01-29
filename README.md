@@ -207,7 +207,7 @@ Tento projekt vznikol ako reakcia na konkrétnu potrebu zákazníka v oblasti ko
 
 Ďakujeme spoločnostiam:
 
-Cykloon — https://www.cykloon.com/
+Cykloon — https://cykloon.com/
 
 Trialexa — https://trialexa.com/
 
