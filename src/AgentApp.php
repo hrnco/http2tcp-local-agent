@@ -8,15 +8,17 @@ final class AgentApp
     private string $corsOrigin;
     private int $connectTimeout;
     private int $readTimeout;
+    private string $docsUrl;
 
     public function __construct(string $envPath)
     {
         $env = $this->loadEnv($envPath);
-        $this->dataDir = rtrim((string)$this->getEnvValue($env, 'DATA_DIR', '/data'), '/');
+        $this->dataDir = rtrim((string)$this->getEnvValue($env, 'HTTP2TCP_DATA_DIR', '/data'), '/');
         $this->publicKeyPath = $this->dataDir . '/server_public.pem';
         $this->corsOrigin = (string)$this->getEnvValue($env, 'HTTP2TCP_CORS_ALLOW_ORIGIN', '*');
-        $this->connectTimeout = (int)$this->getEnvValue($env, 'TCP_CONNECT_TIMEOUT', 2);
-        $this->readTimeout = (int)$this->getEnvValue($env, 'TCP_READ_TIMEOUT', 2);
+        $this->connectTimeout = (int)$this->getEnvValue($env, 'HTTP2TCP_TCP_CONNECT_TIMEOUT', 2);
+        $this->readTimeout = (int)$this->getEnvValue($env, 'HTTP2TCP_TCP_READ_TIMEOUT', 2);
+        $this->docsUrl = (string)$this->getEnvValue($env, 'HTTP2TCP_DOCS_URL', 'https://github.com/hrnco/http2tcp-local-agent');
     }
 
     public function handle(): void
@@ -430,7 +432,7 @@ final class AgentApp
     private function handleRoot(): void
     {
         $paired = is_file($this->publicKeyPath);
-        $docsUrl = (string)$this->getEnvValue([], 'HTTP2TCP_DOCS_URL', 'https://github.com/hrnco/http2tcp-local-agent');
+        $docsUrl = $this->docsUrl;
         $statusText = $paired ? 'paired' : 'not paired';
         $statusColor = $paired ? '#1a7f37' : '#d1242f';
 

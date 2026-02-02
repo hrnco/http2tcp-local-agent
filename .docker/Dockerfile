@@ -1,8 +1,5 @@
 FROM php:8.4-apache AS base
 
-ENV HTTP2TCP_CORS_ALLOW_ORIGIN="*"
-ENV HTTP2TCP_DOCS_URL="https://github.com/hrnco/http2tcp-local-agent"
-
 RUN apt-get update && apt-get install -y \
     openssl \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
