@@ -9,6 +9,8 @@ final class AgentApp
     private int $connectTimeout;
     private int $readTimeout;
     private string $docsUrl;
+    private string $nonceStorePath;
+    private int $nonceTtl;
 
     public function __construct(string $envPath)
     {
@@ -19,6 +21,8 @@ final class AgentApp
         $this->connectTimeout = (int)$this->getEnvValue($env, 'HTTP2TCP_TCP_CONNECT_TIMEOUT', 2);
         $this->readTimeout = (int)$this->getEnvValue($env, 'HTTP2TCP_TCP_READ_TIMEOUT', 2);
         $this->docsUrl = (string)$this->getEnvValue($env, 'HTTP2TCP_DOCS_URL', 'https://github.com/hrnco/http2tcp-local-agent');
+        $this->nonceStorePath = $this->dataDir . '/nonce_store.json';
+        $this->nonceTtl = (int)$this->getEnvValue($env, 'HTTP2TCP_NONCE_TTL', 3600);
     }
 
     public function handle(): void
@@ -94,12 +98,22 @@ final class AgentApp
         $payload = $this->canonicalPayload((string)$instructions, (string)$kid, (string)$exp, (string)$nonce);
         $sigBinary = $this->decodeSignature((string)$sig);
         if ($sigBinary === null) {
-            $this->respondJson(400, ['status' => 'invalid-signature', 'error' => 'Signature must be base64url, base64, or hex.']);
+            $this->respondJson(400, ['status' => 'invalid-signature', 'error' => 'Signature must be base64url or base64.']);
             return;
         }
 
         if (!$this->verifySignature($this->publicKeyPath, $payload, $sigBinary)) {
             $this->respondJson(401, ['status' => 'invalid-signature', 'error' => 'Signature verification failed.']);
+            return;
+        }
+
+        $nonceError = $this->checkAndStoreNonce((string)$kid, (string)$nonce, (string)$exp);
+        if ($nonceError !== null) {
+            $status = $nonceError === 'replay' ? 409 : 500;
+            $message = $nonceError === 'replay'
+                ? 'Nonce already used.'
+                : 'Unable to persist nonce.';
+            $this->respondJson($status, ['status' => 'nonce-error', 'error' => $message]);
             return;
         }
 
@@ -111,7 +125,6 @@ final class AgentApp
 
         $deviceIp = $instructionData['deviceIp'] ?? null;
         $devicePort = $instructionData['devicePort'] ?? null;
-        $payloadHex = $instructionData['payloadHex'] ?? null;
         $payloadBase64 = $instructionData['payloadBase64'] ?? null;
 
         if (!filter_var($deviceIp, FILTER_VALIDATE_IP)) {
@@ -122,23 +135,34 @@ final class AgentApp
             $this->respondJson(400, ['status' => 'invalid-device-port', 'error' => 'devicePort must be 1-65535.']);
             return;
         }
-        if ($payloadHex === null && $payloadBase64 === null) {
-            $this->respondJson(400, ['status' => 'invalid-payload', 'error' => 'payloadHex or payloadBase64 is required.']);
+        if ($payloadBase64 === null) {
+            $this->respondJson(400, ['status' => 'invalid-payload', 'error' => 'payloadBase64 is required.']);
             return;
         }
-        if ($payloadHex !== null && (!is_string($payloadHex) || $payloadHex === '' || !ctype_xdigit($payloadHex))) {
-            $this->respondJson(400, ['status' => 'invalid-payload', 'error' => 'payloadHex must be a hex string.']);
-            return;
-        }
-        if ($payloadBase64 !== null && $this->decodeBase64($payloadBase64) === null) {
-            $this->respondJson(400, ['status' => 'invalid-payload', 'error' => 'payloadBase64 must be base64 or base64url.']);
+        if (is_string($payloadBase64)) {
+            if ($payloadBase64 === '' || $this->decodeBase64($payloadBase64) === null) {
+                $this->respondJson(400, ['status' => 'invalid-payload', 'error' => 'payloadBase64 must be base64 or base64url.']);
+                return;
+            }
+        } elseif (is_array($payloadBase64)) {
+            if ($payloadBase64 === []) {
+                $this->respondJson(400, ['status' => 'invalid-payload', 'error' => 'payloadBase64 array must not be empty.']);
+                return;
+            }
+            foreach ($payloadBase64 as $chunk) {
+                if (!is_string($chunk) || $chunk === '' || $this->decodeBase64($chunk) === null) {
+                    $this->respondJson(400, ['status' => 'invalid-payload', 'error' => 'payloadBase64 array items must be base64 or base64url strings.']);
+                    return;
+                }
+            }
+        } else {
+            $this->respondJson(400, ['status' => 'invalid-payload', 'error' => 'payloadBase64 must be a base64 string or array of base64 strings.']);
             return;
         }
 
         $tcpResult = $this->sendTcp(
             (string)$deviceIp,
             (int)$devicePort,
-            $payloadHex,
             $payloadBase64
         );
         if ($tcpResult['ok'] === false) {
@@ -157,7 +181,6 @@ final class AgentApp
             'device' => ['ip' => $deviceIp, 'port' => (int)$devicePort],
             'bytes_written' => $tcpResult['bytes_written'],
             'bytes_read' => $tcpResult['bytes_read'],
-            'response_hex' => $tcpResult['response_hex'],
             'response_base64' => $tcpResult['response_base64'],
         ]);
     }
@@ -272,11 +295,6 @@ final class AgentApp
             return $binary;
         }
 
-        if (ctype_xdigit($sig) && strlen($sig) % 2 === 0) {
-            $hex = hex2bin($sig);
-            return $hex === false ? null : $hex;
-        }
-
         return null;
     }
 
@@ -338,17 +356,23 @@ final class AgentApp
         return $parsed !== [] ? $parsed : null;
     }
 
-    private function sendTcp(string $ip, int $port, ?string $payloadHex, ?string $payloadBase64): array
+    private function sendTcp(string $ip, int $port, string|array $payloadBase64): array
     {
-        $payload = null;
-        if ($payloadHex !== null) {
-            $payload = hex2bin($payloadHex);
-        } elseif ($payloadBase64 !== null) {
-            $payload = $this->decodeBase64($payloadBase64);
-        }
-
-        if ($payload === null) {
-            return ['ok' => false, 'error' => 'Invalid payload encoding.'];
+        $payloadChunks = [];
+        if (is_array($payloadBase64)) {
+            foreach ($payloadBase64 as $chunk) {
+                $binary = $this->decodeBase64($chunk);
+                if ($binary === null) {
+                    return ['ok' => false, 'error' => 'Invalid payload encoding.'];
+                }
+                $payloadChunks[] = $binary;
+            }
+        } else {
+            $binary = $this->decodeBase64($payloadBase64);
+            if ($binary === null) {
+                return ['ok' => false, 'error' => 'Invalid payload encoding.'];
+            }
+            $payloadChunks[] = $binary;
         }
 
         $errno = 0;
@@ -359,7 +383,15 @@ final class AgentApp
         }
 
         stream_set_timeout($fp, $this->readTimeout);
-        $bytesWritten = fwrite($fp, $payload);
+        $bytesWritten = 0;
+        foreach ($payloadChunks as $chunk) {
+            $written = fwrite($fp, $chunk);
+            if ($written === false) {
+                fclose($fp);
+                return ['ok' => false, 'error' => 'Failed to write payload.'];
+            }
+            $bytesWritten += $written;
+        }
 
         $response = '';
         while (!feof($fp)) {
@@ -379,9 +411,8 @@ final class AgentApp
 
         return [
             'ok' => true,
-            'bytes_written' => $bytesWritten === false ? 0 : $bytesWritten,
+            'bytes_written' => $bytesWritten,
             'bytes_read' => strlen($response),
-            'response_hex' => bin2hex($response),
             'response_base64' => base64_encode($response),
         ];
     }
@@ -393,6 +424,65 @@ final class AgentApp
             return $decoded;
         }
         return $this->base64urlDecode($data);
+    }
+
+    private function checkAndStoreNonce(string $kid, string $nonce, string $exp): ?string
+    {
+        if ($this->nonceTtl <= 0) {
+            return null;
+        }
+
+        $now = time();
+        $expInt = ctype_digit($exp) ? (int)$exp : ($now + $this->nonceTtl);
+        $expiresAt = min($expInt, $now + $this->nonceTtl);
+
+        $fp = @fopen($this->nonceStorePath, 'c+');
+        if ($fp === false) {
+            return 'store-unavailable';
+        }
+
+        if (!flock($fp, LOCK_EX)) {
+            fclose($fp);
+            return 'store-unavailable';
+        }
+
+        $contents = stream_get_contents($fp);
+        $store = json_decode($contents ?: '', true);
+        if (!is_array($store)) {
+            $store = [];
+        }
+
+        foreach ($store as $key => $expiry) {
+            if (!is_int($expiry)) {
+                if (is_string($expiry) && ctype_digit($expiry)) {
+                    $expiry = (int)$expiry;
+                } else {
+                    unset($store[$key]);
+                    continue;
+                }
+            }
+            if ($expiry <= $now) {
+                unset($store[$key]);
+            }
+        }
+
+        $key = hash('sha256', $kid . '|' . $nonce);
+        if (isset($store[$key]) && (int)$store[$key] > $now) {
+            flock($fp, LOCK_UN);
+            fclose($fp);
+            return 'replay';
+        }
+
+        $store[$key] = $expiresAt;
+
+        ftruncate($fp, 0);
+        rewind($fp);
+        fwrite($fp, json_encode($store, JSON_UNESCAPED_SLASHES));
+        fflush($fp);
+        flock($fp, LOCK_UN);
+        fclose($fp);
+
+        return null;
     }
 
     private function loadEnv(string $path): array

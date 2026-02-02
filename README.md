@@ -146,7 +146,7 @@ Server vytvorí kryptograficky autorizovanú obálku (serialized parametre), kto
 
 **Vstup pre server (signing):**
 - `deviceIp` + `devicePort` (cieľové LAN zariadenie)
-- `payloadHex` (TCP payload v hex formáte)
+- `payloadBase64` (TCP payload v base64/base64url) alebo pole `payloadBase64` pre dávkové posielanie
 
 **Výstup zo servera:**
 - serializovaný reťazec s parametrami `instructions`, `sig`, `kid`, `exp`, `nonce`
