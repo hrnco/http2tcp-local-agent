@@ -1,5 +1,15 @@
 services:
+  server:
+    image: ghcr.io/hrnco/http2tcp-signing-server:latest
+    ports:
+      - "8080:80"
+    environment:
+      APP_ENV: dev
+    volumes:
+      - keys:/keys
+
   agent:
+#    image: ghcr.io/hrnco/http2tcp-local-agent:dev-latest
     build:
       target: DEV
       context: .
@@ -9,9 +19,15 @@ services:
 #      HTTP2TCP_DOCS_URL: ${HTTP2TCP_DOCS_URL:-https://github.com/hrnco/http2tcp-local-agent}
     ports:
       - "34279:80"
+    environment:
+      APP_ENV: dev
     volumes:
       - ./:/var/www/html
-      - ./.docker/apache/000-default.conf:/etc/apache2/sites-available/000-default.conf:ro
+      - agent_data:/data
     restart: unless-stopped
 #    extra_hosts:
 #      - "host.docker.internal:host-gateway"
+
+volumes:
+  keys:
+  agent_data:
