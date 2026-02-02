@@ -142,8 +142,28 @@ http://localhost:34279
 
 ## Základný princíp API
 
-Server vracia kryptograficky autorizovanú obálku, ktorú browser pošle agentovi.  
-[todo ai: dopln vydedukovanim na zaklade temporary_http2tcp-server-test/README.md]
+Server vytvorí kryptograficky autorizovanú obálku (serialized parametre), ktorú browser pošle agentovi.
+
+**Vstup pre server (signing):**
+- `deviceIp` + `devicePort` (cieľové LAN zariadenie)
+- `payloadHex` (TCP payload v hex formáte)
+
+**Výstup zo servera:**
+- serializovaný reťazec s parametrami `instructions`, `sig`, `kid`, `exp`, `nonce`
+
+**Tok (high-level):**
+1. Web/Cloud app zavolá signing server (napr. `POST /api/sign`) a získa podpisané parametre.
+2. Browser prepošle tie isté parametre na lokálneho agenta (`GET/POST /api/send`).
+3. Agent overí podpis (TOFU) a vykoná TCP request na LAN zariadenie.
+
+**Príklad (browser POST):**
+```js
+fetch('http://localhost:34279/api/send', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  body: 'instructions=...&sig=...&kid=...&exp=...&nonce=...'
+});
+```
 ---
 
 ## Čo tento projekt nie je
