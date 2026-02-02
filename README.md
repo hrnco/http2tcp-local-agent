@@ -1,59 +1,59 @@
 # HTTP2TCP Local Agent
 
-`hrnco/http2tcp-local-agent` je ľahký lokálny HTTP server bežiaci v Dockeri, ktorý umožňuje webovým alebo cloudovým aplikáciám bezpečne komunikovať so zariadeniami v LAN cez TCP – bez potreby otvárať porty, nastavovať VPN alebo exponovať LAN smerom do internetu.
+`hrnco/http2tcp-local-agent` is a lightweight local HTTP server running in Docker that lets web or cloud apps securely communicate with LAN devices over TCP—without opening ports, setting up VPNs, or exposing the LAN to the internet.
 
-Hlavná idea:
+Core idea:
 
-> Cloud / Web App → http2tcp-server (crypto/signing) → Browser → http://localhost:<port> → HTTP2TCP Local Agent → TCP → LAN zariadenie
+> Cloud / Web App → http2tcp-server (crypto/signing) → Browser → http://localhost:<port> → HTTP2TCP Local Agent → TCP → LAN device
 
-Cloud nikdy nepotrebuje priamy prístup do vnútornej siete zákazníka.
-
----
-
-## Prehľad
-
-HTTP2TCP Local Agent funguje ako:
-
-- **HTTP server na localhoste** – prijíma požiadavky z prehliadača alebo lokálneho klienta
-- **TCP klient do LAN** – nadväzuje výstupné TCP spojenia na zariadenia v lokálnej sieti (tlačiarne, pokladnice, terminály, IoT…)
-- **kryptograficky overujúci agent** – akceptuje iba poziadavky, ktore su autorizovane serverom (cez podpís)
-
-Doplnková serverová časť (`https://github.com/hrnco/http2tcp-signing-server`) slúži ako:
-
-- držiteľ private key (kazdy privatny key je unikatny - podla id zariadenia)
-- prekladač aplikačných požiadaviek do podpisanej podoby 
-
-Server **nekomunikuje priamo s agentom** – agent komunikuje iba s browserom na localhoste.
-
-Typické LAN zariadenia:
-
-- ESC/POS LAN tlačiarne (port 9100)
-- ZPL etikety (Zebra, port 9100)
-- fiskálne pokladnice (napr. FiskalPRO API na porte 3000)
-- špecializované TCP zariadenia (skenery, IoT gatewaye…)
+The cloud never needs direct access to the customer’s internal network.
 
 ---
 
-## Typické scenáre použitia
+## Overview
 
-- Cloudový fakturačný/POS systém, ktorý potrebuje tlačiť účtenky na lokálnej tlačiarni
-- Webová aplikácia, ktorá musí komunikovať s LAN pokladnicou cez proprietárny TCP protokol
-- Centrálne webové UI, ktoré riadi lokálne TCP zariadenia bez VPN
-- Prostredia, kde IT oddelenie nedovolí otvárať porty ani nastavovať port-forwarding
+HTTP2TCP Local Agent acts as:
+
+- **HTTP server on localhost** – accepts requests from the browser or a local client
+- **TCP client to LAN** – opens outbound TCP connections to devices on the local network (printers, cash registers, terminals, IoT…)
+- **cryptographically verifying agent** – accepts only requests authorized by the server (via signature)
+
+The companion server component (`https://github.com/hrnco/http2tcp-signing-server`) serves as:
+
+- holder of the private key (each private key is unique by device ID)
+- translator of application requests into a signed form
+
+The server **does not communicate directly with the agent** — the agent communicates only with the browser on localhost.
+
+Typical LAN devices:
+
+- ESC/POS LAN printers (port 9100)
+- ZPL label printers (Zebra, port 9100)
+- fiscal cash registers (e.g., FiskalPRO API on port 3000)
+- specialized TCP devices (scanners, IoT gateways…)
 
 ---
 
-## Architektúra (high-level)
+## Typical use cases
 
-Tok komunikácie:
+- Cloud invoicing/POS system that needs to print receipts to a local printer
+- Web app that must communicate with a LAN cash register via a proprietary TCP protocol
+- Centralized web UI that controls local TCP devices without VPN
+- Environments where IT prohibits opening ports or setting up port-forwarding
 
-1. **Cloud / Web aplikácia** požiada server o podpísanú/šifrovanú požiadavku
-2. **http2tcp-server** vytvorí obálku (s autorizovanym podpisom)
-3. **Browser (JS)** pošle túto obálku na `http://localhost:<port>`
-4. **HTTP2TCP Local Agent** overí podpis a vykoná TCP operáciu
-5. **LAN zariadenie** spracuje TCP komunikáciu
+---
 
-Schematicky:
+## Architecture (high-level)
+
+Communication flow:
+
+1. **Cloud / Web app** asks the server for a signed/encrypted request
+2. **http2tcp-server** creates an envelope (with an authorized signature)
+3. **Browser (JS)** sends this envelope to `http://localhost:<port>`
+4. **HTTP2TCP Local Agent** verifies the signature and performs the TCP operation
+5. **LAN device** processes the TCP communication
+
+Diagram:
 
 ```
 Cloud / Web App
@@ -78,61 +78,61 @@ HTTP2TCP Local Agent
 
 ---
 
-## Bezpečnostný model
+## Security model
 
-### Digitálny podpis
+### Digital signature
 
-Každá požiadavka je podpísaná pomocou private key servera.
+Each request is signed with the server’s private key.
 
-Agent overuje podpis pomocou uloženého server public key.
+The agent verifies the signature using the stored server public key.
 
-Podpis je povinný vždy.
+A signature is always required.
 
 ---
 
 ### Trust On First Use (TOFU)
 
-Pri prvom spojení:
+On the first connection:
 
-1. Server pošle beznu spravu - aj svoj public key
-2. Agent si uloží public key
-3. Od tej chvíle dôveruje iba tomuto kľúču
+1. The server sends a normal message — and its public key
+2. The agent stores the public key
+3. From then on it trusts only that key
 
-Ak agent dostane nepodpisanu poziadavku, pripadne podpisanu inym klucom, tak ju odmietne.
+If the agent receives an unsigned request, or one signed with a different key, it rejects it.
 
 ---
 
-### Ochrana proti replay útokom
+### Replay attack protection
 
-Každá požiadavka obsahuje timestamp. 
+Each request includes a timestamp.
 
-Agent odmietne staré požiadavky.
+The agent rejects stale requests.
 
 ---
 
 ### Payload
 
-- payload nie je šifrovaný
-- je podpísaný
-- zaručuje integritu a autentickosť
+- payload is not encrypted
+- it is signed
+- ensures integrity and authenticity
 
 ---
 
-### Tipy
+### Tips
 
 - for higher security, restrict LAN device access to the agent IP using firewall or VLAN rules
 
 ---
 
-## Rýchly štart (Docker)
+## Quick start (Docker)
 
-Odporúčaný spôsob spustenia:
+Recommended way to run:
 
 ```bash
 docker run -d --restart=unless-stopped --name http2tcp-agent -p 127.0.0.1:34279:80 hrnco/http2tcp-local-agent
 ```
 
-Po spustení je agent dostupný na:
+After it starts, the agent is available at:
 
 ```
 http://localhost:34279
@@ -140,23 +140,23 @@ http://localhost:34279
 
 ---
 
-## Základný princíp API
+## API core principle
 
-Server vytvorí kryptograficky autorizovanú obálku (serialized parametre), ktorú browser pošle agentovi.
+The server creates a cryptographically authorized envelope (serialized parameters) that the browser sends to the agent.
 
-**Vstup pre server (signing):**
-- `deviceIp` + `devicePort` (cieľové LAN zariadenie)
-- `payloadBase64` (TCP payload v base64/base64url) alebo pole `payloadBase64` pre dávkové posielanie
+**Input for server (signing):**
+- `deviceIp` + `devicePort` (target LAN device)
+- `payloadBase64` (TCP payload in base64/base64url) or an array `payloadBase64` for batch sending
 
-**Výstup zo servera:**
-- serializovaný reťazec s parametrami `instructions`, `sig`, `kid`, `exp`, `nonce`
+**Output from server:**
+- serialized string with parameters `instructions`, `sig`, `kid`, `exp`, `nonce`
 
-**Tok (high-level):**
-1. Web/Cloud app zavolá signing server (napr. `POST /api/sign`) a získa podpisané parametre.
-2. Browser prepošle tie isté parametre na lokálneho agenta (`GET/POST /api/send`).
-3. Agent overí podpis (TOFU) a vykoná TCP request na LAN zariadenie.
+**Flow (high-level):**
+1. Web/Cloud app calls the signing server (e.g. `POST /api/sign`) and gets signed parameters.
+2. Browser forwards the same parameters to the local agent (`GET/POST /api/send`).
+3. The agent verifies the signature (TOFU) and performs the TCP request to the LAN device.
 
-**Príklad (browser POST):**
+**Example (browser POST):**
 ```js
 fetch('http://localhost:34279/api/send', {
   method: 'POST',
@@ -166,27 +166,27 @@ fetch('http://localhost:34279/api/send', {
 ```
 ---
 
-## Čo tento projekt nie je
+## What this project is not
 
-HTTP2TCP Local Agent nie je:
+HTTP2TCP Local Agent is not:
 
-- VPN server ani sieťový tunel
-- univerzálny port-forwarder z internetu do LAN
-- SSH náhrada
-- nástroj na vzdialenú správu PC
+- a VPN server or network tunnel
+- a universal port-forwarder from the internet into the LAN
+- an SSH replacement
+- a remote PC management tool
 
-Je to **špecializovaný, lokálny, kryptograficky overujúci agent** na bezpečné TCP operácie.
+It is a **specialized, local, cryptographically verifying agent** for safe TCP operations.
 
 ---
 
-## Poďakovanie
+## Acknowledgments
 
-Tento projekt vznikol ako reakcia na konkrétnu potrebu zákazníka v oblasti komunikácie s LAN zariadeniami.
+This project was created in response to a specific customer need in the area of LAN device communication.
 
-Ďakujeme spoločnostiam:
+Thanks to the companies:
 
 Cykloon — https://cykloon.com/
 
 Trialexa — https://trialexa.com/
 
-za konzultácie, podporu a umožnenie otvorenia projektu ako open-source.
+for consultations, support, and enabling this project to be open-sourced.
