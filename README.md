@@ -16,13 +16,12 @@ HTTP2TCP Local Agent funguje ako:
 
 - **HTTP server na localhoste** – prijíma požiadavky z prehliadača alebo lokálneho klienta
 - **TCP klient do LAN** – nadväzuje výstupné TCP spojenia na zariadenia v lokálnej sieti (tlačiarne, pokladnice, terminály, IoT…)
-- **kryptograficky overujúci agent** – akceptuje iba serverom podpísané (a voliteľne šifrované) požiadavky
+- **kryptograficky overujúci agent** – akceptuje iba poziadavky, ktore su autorizovane serverom (cez podpís)
 
-Doplnková serverová časť (`http2tcp-server`) slúži ako:
+Doplnková serverová časť (`https://github.com/hrnco/http2tcp-signing-server`) slúži ako:
 
-- držiteľ private key
-- podpisový / šifrovací modul
-- prekladač aplikačných požiadaviek do kryptograficky autorizovanej podoby
+- držiteľ private key (kazdy privatny key je unikatny - podla id zariadenia)
+- prekladač aplikačných požiadaviek do podpisanej podoby 
 
 Server **nekomunikuje priamo s agentom** – agent komunikuje iba s browserom na localhoste.
 
@@ -49,7 +48,7 @@ Typické LAN zariadenia:
 Tok komunikácie:
 
 1. **Cloud / Web aplikácia** požiada server o podpísanú/šifrovanú požiadavku
-2. **http2tcp-server** vytvorí kryptografickú obálku (signature/encryption)
+2. **http2tcp-server** vytvorí obálku (s autorizovanym podpisom)
 3. **Browser (JS)** pošle túto obálku na `http://localhost:<port>`
 4. **HTTP2TCP Local Agent** overí podpis a vykoná TCP operáciu
 5. **LAN zariadenie** spracuje TCP komunikáciu
@@ -59,7 +58,7 @@ Schematicky:
 ```
 Cloud / Web App
         |
-        |  HTTPS
+        |  HTTP (internal CLOUD network)
         v
  http2tcp-server
  (signing/encryption)
@@ -83,11 +82,11 @@ HTTP2TCP Local Agent
 
 ### Digitálny podpis
 
-Každá požiadavka je podpísaná private key servera.
+Každá požiadavka je podpísaná pomocou private key servera.
 
 Agent overuje podpis pomocou uloženého server public key.
 
-Podpis je povinný vždy – aj pri nešifrovanom payload-e.
+Podpis je povinný vždy.
 
 ---
 
@@ -95,11 +94,11 @@ Podpis je povinný vždy – aj pri nešifrovanom payload-e.
 
 Pri prvom spojení:
 
-1. Server pošle svoj public key
-2. Agent si ho uloží (pinning)
+1. Server pošle beznu spravu - aj svoj public key
+2. Agent si uloží public key
 3. Od tej chvíle dôveruje iba tomuto kľúču
 
-Ak sa kľúč zmení, agent požiadavky odmietne.
+Ak agent dostane nepodpisanu poziadavku, pripadne podpisanu inym klucom, tak ju odmietne.
 
 ---
 
@@ -125,46 +124,6 @@ Agent odmietne staré požiadavky.
 
 ---
 
-## Key management
-
-### Server keyring
-
-Server môže mať viac private key (`key_id`):
-
-- per zákazník
-- per tenant
-- per zariadenie
-
-To umožňuje izoláciu a rotáciu.
-
----
-
-### Uloženie kľúčov
-
-Private keys nie sú súčasťou Docker image.
-
-Odporúčané možnosti:
-
-- Docker volume
-- databáza + šifrovanie at-rest
-- Vault / KMS
-
-Kľúče prežijú recreate kontajnera.
-
----
-
-### Rotácia kľúčov
-
-Agent môže akceptovať viac public key naraz.
-
-Postup:
-
-1. odstrániť starý private key zo servera
-2. odparovat agenta zo starym klucom
-3. server autoamticky vytvori novy private key a agent, kedze nie je sparovany sa automaticky sparuje
-
----
-
 ## Rýchly štart (Docker)
 
 Odporúčaný spôsob spustenia:
@@ -183,9 +142,28 @@ http://localhost:34279
 
 ## Základný princíp API
 
-Server vracia kryptograficky autorizovanú obálku, ktorú browser pošle agentovi.  
-Špecifikácia formátu bude doplnená.
+Server vytvorí kryptograficky autorizovanú obálku (serialized parametre), ktorú browser pošle agentovi.
 
+**Vstup pre server (signing):**
+- `deviceIp` + `devicePort` (cieľové LAN zariadenie)
+- `payloadBase64` (TCP payload v base64/base64url) alebo pole `payloadBase64` pre dávkové posielanie
+
+**Výstup zo servera:**
+- serializovaný reťazec s parametrami `instructions`, `sig`, `kid`, `exp`, `nonce`
+
+**Tok (high-level):**
+1. Web/Cloud app zavolá signing server (napr. `POST /api/sign`) a získa podpisané parametre.
+2. Browser prepošle tie isté parametre na lokálneho agenta (`GET/POST /api/send`).
+3. Agent overí podpis (TOFU) a vykoná TCP request na LAN zariadenie.
+
+**Príklad (browser POST):**
+```js
+fetch('http://localhost:34279/api/send', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  body: 'instructions=...&sig=...&kid=...&exp=...&nonce=...'
+});
+```
 ---
 
 ## Čo tento projekt nie je
@@ -212,9 +190,3 @@ Cykloon — https://cykloon.com/
 Trialexa — https://trialexa.com/
 
 za konzultácie, podporu a umožnenie otvorenia projektu ako open-source.
-
----
-
-## Licencia
-
-Bude doplnené.
