@@ -1,0 +1,27 @@
+services:
+
+  server:
+    image: ghcr.io/hrnco/http2tcp-signing-server:latest
+    ports:
+      - "9075:80"
+    environment:
+      APP_ENV: dev
+      TEST_DEFAULT_PAYLOAD_ASCII: "FTEKASASTATE|FRSTAT|FRINFO|FRVATINFO|FTUID9-0ade7c2cf9-02248a71-89af-41bc-8361-bb59f56cf74f|FTOPEN30|FITEMA11.90|FITEMTtest|FITEMHV|FITEMOO-3991C97580B1494C91C97580B1A-TEST|FITEMQ1|FITEMV4|FTOTA11.90|FPAYRHotovost|FPAYI1|FPAYA11.90|FPAYE|FTCLOSE|FTDOCINFO"
+      TEST_DEFAULT_PAYLOAD_TYPE: ascii
+    volumes:
+      - keys:/keys
+
+  agent:
+    image: ghcr.io/hrnco/http2tcp-local-agent:latest
+    ports:
+      - "34279:80"
+    environment:
+      HTTP2TCP_CORS_ALLOW_ORIGIN: http://localhost:9075
+
+    volumes:
+      - agent_data:/data
+    restart: unless-stopped
+
+volumes:
+  keys:
+  agent_data:
