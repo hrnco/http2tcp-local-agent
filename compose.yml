@@ -20,7 +20,6 @@ services:
     volumes:
 #      - ./:/var/www/html
       - agent_data:/data
-    restart: unless-stopped
 
 volumes:
   keys:
