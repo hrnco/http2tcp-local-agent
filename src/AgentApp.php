@@ -187,7 +187,9 @@ final class AgentApp
 
     private function sendCors(): void
     {
-        header('Access-Control-Allow-Origin: ' . $this->corsOrigin);
+        foreach (explode('|', (string) $this->corsOrigin) as $origin) {
+            header('Access-Control-Allow-Origin: ' . trim($origin));
+        }
         header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
         header('Access-Control-Allow-Headers: Content-Type, X-Custom-Header');
         if ($this->corsOrigin !== '*') {
