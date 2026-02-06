@@ -12,6 +12,7 @@ services:
       APP_ENV: dev
       TEST_DEFAULT_DEVICE_PORT: 9000
       TEST_DEFAULT_DEVICE_IP: tcp-echo
+      #TTL_SECONDS: 1 # Short TTL for testing
     volumes:
       - keys:/keys
 
