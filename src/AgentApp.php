@@ -444,17 +444,10 @@ final class AgentApp
 
     private function sendTcp(string $ip, int $port, string|array $payloadBase64): array
     {
+        $payloadBase64Chunks = is_array($payloadBase64) ? array_values($payloadBase64) : [$payloadBase64];
         $payloadChunks = [];
-        if (is_array($payloadBase64)) {
-            foreach ($payloadBase64 as $chunk) {
-                $binary = $this->decodeBase64($chunk);
-                if ($binary === null) {
-                    return ['ok' => false, 'error' => 'Invalid payload encoding.'];
-                }
-                $payloadChunks[] = $binary;
-            }
-        } else {
-            $binary = $this->decodeBase64($payloadBase64);
+        foreach ($payloadBase64Chunks as $chunk) {
+            $binary = $this->decodeBase64($chunk);
             if ($binary === null) {
                 return ['ok' => false, 'error' => 'Invalid payload encoding.'];
             }
@@ -473,7 +466,7 @@ final class AgentApp
         $responses = [];
         $time = microtime(true);
 
-        $drainReads = function () use ($fp, &$responses, $time): void {
+        $drainReads = function (?string $requestBase64) use ($fp, &$responses, $time): void {
             while (true) {
                 $r = [$fp];
                 $w = null;
@@ -492,14 +485,17 @@ final class AgentApp
 
                 $responses[] = [
                     'time' => microtime(true) - $time,
+                    'request_base64' => $requestBase64,
                     'response_base64' => base64_encode($chunk),
                 ];
             }
         };
 
         $bytesWritten = 0;
+        $lastRequestBase64 = null;
 
-        foreach ($payloadChunks as $chunk) {
+        foreach ($payloadChunks as $index => $chunk) {
+            $requestBase64 = $payloadBase64Chunks[$index] ?? null;
             // Ensure the whole chunk is written (fwrite may write partially)
             $offset = 0;
             $len = strlen($chunk);
@@ -516,14 +512,15 @@ final class AgentApp
             }
 
             // Read any responses produced after this chunk
-            $drainReads();
+            $drainReads($requestBase64);
+            $lastRequestBase64 = $requestBase64;
         }
 
         // Signal "no more data will be sent" - many devices respond only after this
         @stream_socket_shutdown($fp, STREAM_SHUT_WR);
 
         // Final drain: read whatever the device sends right after shutdown
-        $drainReads();
+        $drainReads($lastRequestBase64);
 
         // Optional: wait up to readTimeout seconds for trailing data, but don't hang forever
         $deadline = microtime(true) + (float) $this->readTimeout;
@@ -548,6 +545,7 @@ final class AgentApp
 
             $responses[] = [
                 'time' => microtime(true) - $time,
+                'request_base64' => $lastRequestBase64,
                 'response_base64' => base64_encode($chunk),
             ];
         }
