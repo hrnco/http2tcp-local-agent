@@ -53,6 +53,9 @@ final class AgentApp
         }
 
         $params = $this->readParams();
+        $signatureUid = $params['signature_uid'] ?? null;
+        $signatureTimestamp = $params['signature_timestamp'] ?? null;
+        $signatureMetadata = $params['signature_metadata'] ?? null;
         $instructions = $params['instructions'] ?? null;
         $sig = $params['sig'] ?? null;
         $kid = $params['kid'] ?? null;
@@ -60,8 +63,9 @@ final class AgentApp
         $nonce = $params['nonce'] ?? null;
         $pub = $params['pub'] ?? $params['pubkey'] ?? null;
 
-        if ($exp !== null && ctype_digit((string)$exp)) {
-            if ((int)$exp < time()) {
+        if ($exp !== null) {
+            $expTimestamp = $this->parseExpiryTimestamp((string)$exp);
+            if ($expTimestamp !== null && $expTimestamp < time()) {
                 $this->respondJson(401, ['status' => 'expired', 'error' => 'Signature expired.']);
                 return;
             }
@@ -90,12 +94,23 @@ final class AgentApp
             }
         }
 
-        if ($instructions === null || $sig === null || $kid === null || $exp === null || $nonce === null) {
-            $this->respondJson(400, ['status' => 'missing-params', 'error' => 'Required params: instructions, sig, kid, exp, nonce.']);
+        if ($signatureUid === null || $signatureTimestamp === null || $signatureMetadata === null || $instructions === null || $sig === null || $kid === null || $exp === null || $nonce === null) {
+            $this->respondJson(400, [
+                'status' => 'missing-params',
+                'error' => 'Required params: signature_uid, signature_timestamp, signature_metadata, instructions, sig, kid, exp, nonce.',
+            ]);
             return;
         }
 
-        $payload = $this->canonicalPayload((string)$instructions, (string)$kid, (string)$exp, (string)$nonce);
+        $payload = $this->canonicalPayload(
+            (string)$signatureUid,
+            (string)$signatureTimestamp,
+            (string)$signatureMetadata,
+            (string)$instructions,
+            (string)$kid,
+            (string)$exp,
+            (string)$nonce
+        );
         $sigBinary = $this->decodeSignature((string)$sig);
         if ($sigBinary === null) {
             $this->respondJson(400, ['status' => 'invalid-signature', 'error' => 'Signature must be base64url or base64.']);
@@ -127,8 +142,13 @@ final class AgentApp
         $devicePort = $instructionData['devicePort'] ?? null;
         $payloadBase64 = $instructionData['payloadBase64'] ?? null;
 
-        if (!filter_var($deviceIp, FILTER_VALIDATE_IP)) {
-            $this->respondJson(400, ['status' => 'invalid-device-ip', 'error' => 'deviceIp is required and must be valid.']);
+        if (!$this->isValidDeviceHost($deviceIp)) {
+            $this->respondJson(400, ['status' => 'invalid-device-ip', 'error' => 'deviceIp is required and must be a valid IP or hostname.']);
+            return;
+        }
+        $resolvedDeviceIp = $this->resolveDeviceIp((string)$deviceIp);
+        if ($resolvedDeviceIp === null) {
+            $this->respondJson(400, ['status' => 'invalid-device-ip', 'error' => 'deviceIp is required and must resolve to a valid IP.']);
             return;
         }
         if (!is_numeric($devicePort) || (int)$devicePort < 1 || (int)$devicePort > 65535) {
@@ -161,7 +181,7 @@ final class AgentApp
         }
 
         $tcpResult = $this->sendTcp(
-            (string)$deviceIp,
+            $resolvedDeviceIp,
             (int)$devicePort,
             $payloadBase64
         );
@@ -169,19 +189,21 @@ final class AgentApp
             $this->respondJson(502, [
                 'status' => 'tcp-error',
                 'error' => $tcpResult['error'],
-                'device' => ['ip' => $deviceIp, 'port' => (int)$devicePort],
+                'device' => ['ip' => $resolvedDeviceIp, 'port' => (int)$devicePort],
             ]);
             return;
         }
-
         $this->respondJson(200, [
+            'signature_uid' => $signatureUid,
+            'signature_timestamp' => $signatureTimestamp,
+            'signature_metadata' => $signatureMetadata,
             'status' => 'ok',
             'paired' => true,
             'kid' => $kid,
-            'device' => ['ip' => $deviceIp, 'port' => (int)$devicePort],
+            'device' => ['ip' => $resolvedDeviceIp, 'port' => (int)$devicePort],
             'bytes_written' => $tcpResult['bytes_written'],
             'bytes_read' => $tcpResult['bytes_read'],
-            'response_base64' => $tcpResult['response_base64'],
+            'response' => $tcpResult['response'],
         ]);
     }
 
@@ -285,9 +307,12 @@ final class AgentApp
         return hash('sha256', $data ?: '');
     }
 
-    private function canonicalPayload(string $instructions, string $kid, string $exp, string $nonce): string
+    private function canonicalPayload(string $signature_uid, string $signature_timestamp, string $signature_metadata, string $instructions, string $kid, string $exp, string $nonce): string
     {
-        return 'instructions=' . rawurlencode($instructions)
+        return 'signature_uid=' . rawurlencode($signature_uid)
+            . '&signature_timestamp=' . rawurlencode($signature_timestamp)
+            . '&signature_metadata=' . rawurlencode($signature_metadata)
+            . '&instructions=' . rawurlencode($instructions)
             . '&kid=' . rawurlencode($kid)
             . '&exp=' . rawurlencode($exp)
             . '&nonce=' . rawurlencode($nonce);
@@ -366,6 +391,57 @@ final class AgentApp
         return $parsed !== [] ? $parsed : null;
     }
 
+    private function isValidDeviceHost(mixed $host): bool
+    {
+        if (!is_string($host)) {
+            return false;
+        }
+        $host = trim($host);
+        if ($host === '') {
+            return false;
+        }
+        if (filter_var($host, FILTER_VALIDATE_IP)) {
+            return true;
+        }
+        if (strcasecmp($host, 'localhost') === 0) {
+            return true;
+        }
+        if (filter_var($host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
+            return true;
+        }
+        return (bool) preg_match('/^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)$/', $host);
+    }
+
+    private function resolveDeviceIp(string $host): ?string
+    {
+        if (filter_var($host, FILTER_VALIDATE_IP)) {
+            return $host;
+        }
+
+        $records = function_exists('dns_get_record')
+            ? @dns_get_record($host, DNS_A + DNS_AAAA)
+            : [];
+        if (is_array($records) && $records !== []) {
+            foreach ($records as $record) {
+                if (isset($record['ip']) && filter_var($record['ip'], FILTER_VALIDATE_IP)) {
+                    return $record['ip'];
+                }
+            }
+            foreach ($records as $record) {
+                if (isset($record['ipv6']) && filter_var($record['ipv6'], FILTER_VALIDATE_IP)) {
+                    return $record['ipv6'];
+                }
+            }
+        }
+
+        $ipv4 = gethostbyname($host);
+        if ($ipv4 !== $host && filter_var($ipv4, FILTER_VALIDATE_IP)) {
+            return $ipv4;
+        }
+
+        return null;
+    }
+
     private function sendTcp(string $ip, int $port, string|array $payloadBase64): array
     {
         $payloadChunks = [];
@@ -387,43 +463,110 @@ final class AgentApp
 
         $errno = 0;
         $errstr = '';
-        $fp = @fsockopen($ip, $port, $errno, $errstr, (float)$this->connectTimeout);
+        $fp = @fsockopen($ip, $port, $errno, $errstr, (float) $this->connectTimeout);
         if ($fp === false) {
             return ['ok' => false, 'error' => $errstr !== '' ? $errstr : 'Connection failed.'];
         }
 
-        stream_set_timeout($fp, $this->readTimeout);
-        $bytesWritten = 0;
-        foreach ($payloadChunks as $chunk) {
-            $written = fwrite($fp, $chunk);
-            if ($written === false) {
-                fclose($fp);
-                return ['ok' => false, 'error' => 'Failed to write payload.'];
+        stream_set_timeout($fp, (int) $this->readTimeout);
+
+        $responses = [];
+        $time = microtime(true);
+
+        $drainReads = function () use ($fp, &$responses, $time): void {
+            while (true) {
+                $r = [$fp];
+                $w = null;
+                $e = null;
+
+                // Wait up to 200ms for readable data (non-blocking-ish drain)
+                $n = @stream_select($r, $w, $e, 0, 200000);
+                if ($n === false || $n === 0) {
+                    break;
+                }
+
+                $chunk = fread($fp, 8192);
+                if ($chunk === '' || $chunk === false) {
+                    break;
+                }
+
+                $responses[] = [
+                    'time' => microtime(true) - $time,
+                    'response_base64' => base64_encode($chunk),
+                ];
             }
-            $bytesWritten += $written;
+        };
+
+        $bytesWritten = 0;
+
+        foreach ($payloadChunks as $chunk) {
+            // Ensure the whole chunk is written (fwrite may write partially)
+            $offset = 0;
+            $len = strlen($chunk);
+
+            while ($offset < $len) {
+                $written = fwrite($fp, substr($chunk, $offset));
+                if ($written === false || $written === 0) {
+                    fclose($fp);
+                    return ['ok' => false, 'error' => 'Failed to write payload.'];
+                }
+
+                $offset += $written;
+                $bytesWritten += $written;
+            }
+
+            // Read any responses produced after this chunk
+            $drainReads();
         }
 
-        $response = '';
-        while (!feof($fp)) {
+        // Signal "no more data will be sent" - many devices respond only after this
+        @stream_socket_shutdown($fp, STREAM_SHUT_WR);
+
+        // Final drain: read whatever the device sends right after shutdown
+        $drainReads();
+
+        // Optional: wait up to readTimeout seconds for trailing data, but don't hang forever
+        $deadline = microtime(true) + (float) $this->readTimeout;
+        while (microtime(true) < $deadline) {
+            $r = [$fp];
+            $w = null;
+            $e = null;
+
+            $remaining = $deadline - microtime(true);
+            $sec = (int) max(0, floor($remaining));
+            $usec = (int) max(0, ($remaining - $sec) * 1_000_000);
+
+            $n = @stream_select($r, $w, $e, $sec, $usec);
+            if ($n === false || $n === 0) {
+                break;
+            }
+
             $chunk = fread($fp, 8192);
             if ($chunk === '' || $chunk === false) {
-                $meta = stream_get_meta_data($fp);
-                if (!empty($meta['timed_out'])) {
-                    break;
-                }
-                if ($chunk === false) {
-                    break;
-                }
+                break;
             }
-            $response .= $chunk;
+
+            $responses[] = [
+                'time' => microtime(true) - $time,
+                'response_base64' => base64_encode($chunk),
+            ];
         }
+
         fclose($fp);
+
+        $bytesRead = 0;
+        foreach ($responses as $r) {
+            $decoded = base64_decode($r['response_base64'], true);
+            if ($decoded !== false) {
+                $bytesRead += strlen($decoded);
+            }
+        }
 
         return [
             'ok' => true,
             'bytes_written' => $bytesWritten,
-            'bytes_read' => strlen($response),
-            'response_base64' => base64_encode($response),
+            'bytes_read' => $bytesRead,
+            'response' => $responses,
         ];
     }
 
@@ -443,7 +586,7 @@ final class AgentApp
         }
 
         $now = time();
-        $expInt = ctype_digit($exp) ? (int)$exp : ($now + $this->nonceTtl);
+        $expInt = $this->parseExpiryTimestamp($exp) ?? ($now + $this->nonceTtl);
         $expiresAt = min($expInt, $now + $this->nonceTtl);
 
         $fp = @fopen($this->nonceStorePath, 'c+');
@@ -493,6 +636,22 @@ final class AgentApp
         fclose($fp);
 
         return null;
+    }
+
+    private function parseExpiryTimestamp(string $exp): ?int
+    {
+        $exp = trim($exp);
+        if ($exp === '') {
+            return null;
+        }
+        if (ctype_digit($exp)) {
+            return (int)$exp;
+        }
+        $timestamp = strtotime($exp);
+        if ($timestamp === false || $timestamp <= 0) {
+            return null;
+        }
+        return $timestamp;
     }
 
     private function loadEnv(string $path): array

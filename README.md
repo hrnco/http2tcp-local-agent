@@ -145,7 +145,7 @@ http://localhost:34279
 The server creates a cryptographically authorized envelope (serialized parameters) that the browser sends to the agent.
 
 **Input for server (signing):**
-- `deviceIp` + `devicePort` (target LAN device)
+- `deviceIp` + `devicePort` (target LAN device host or IP)
 - `payloadBase64` (TCP payload in base64/base64url) or an array `payloadBase64` for batch sending
 
 **Output from server:**
