@@ -63,8 +63,9 @@ final class AgentApp
         $nonce = $params['nonce'] ?? null;
         $pub = $params['pub'] ?? $params['pubkey'] ?? null;
 
-        if ($exp !== null && ctype_digit((string)$exp)) {
-            if ((int)$exp < time()) {
+        if ($exp !== null) {
+            $expTimestamp = $this->parseExpiryTimestamp((string)$exp);
+            if ($expTimestamp !== null && $expTimestamp < time()) {
                 $this->respondJson(401, ['status' => 'expired', 'error' => 'Signature expired.']);
                 return;
             }
@@ -585,7 +586,7 @@ final class AgentApp
         }
 
         $now = time();
-        $expInt = ctype_digit($exp) ? (int)$exp : ($now + $this->nonceTtl);
+        $expInt = $this->parseExpiryTimestamp($exp) ?? ($now + $this->nonceTtl);
         $expiresAt = min($expInt, $now + $this->nonceTtl);
 
         $fp = @fopen($this->nonceStorePath, 'c+');
@@ -635,6 +636,22 @@ final class AgentApp
         fclose($fp);
 
         return null;
+    }
+
+    private function parseExpiryTimestamp(string $exp): ?int
+    {
+        $exp = trim($exp);
+        if ($exp === '') {
+            return null;
+        }
+        if (ctype_digit($exp)) {
+            return (int)$exp;
+        }
+        $timestamp = strtotime($exp);
+        if ($timestamp === false || $timestamp <= 0) {
+            return null;
+        }
+        return $timestamp;
     }
 
     private function loadEnv(string $path): array
