@@ -110,6 +110,20 @@ The agent rejects stale requests.
 
 ---
 
+## Multi-pairing (optional)
+
+By default the agent pairs with a single signing server and stores its public key at `/data/server_public.pem`.
+
+To allow pairing with multiple signing servers (e.g. dev/test/release/prod), enable:
+
+```
+HTTP2TCP_MULTI_PAIRING=1
+```
+
+When enabled, the agent stores per-server public keys under `/data/keys/` based on `kid`, and verifies each request against the matching key. The first paired key is still copied to `/data/server_public.pem` for backward compatibility.
+
+---
+
 ### Payload
 
 - payload is not encrypted

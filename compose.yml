@@ -25,6 +25,8 @@ services:
       - "34279:80"
     environment:
       HTTP2TCP_CORS_ALLOW_ORIGIN: http://localhost:8080
+      HTTP2TCP_MULTI_PAIRING: "true"
+      #HTTP2TCP_MULTI_PAIRING: "true" # only for testing|dev
     volumes:
       - ./:/var/www/html
       - agent_data:/data

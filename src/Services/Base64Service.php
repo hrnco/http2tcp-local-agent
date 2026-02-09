@@ -28,4 +28,9 @@ final class Base64Service
 		$decoded = base64_decode($padded, true);
 		return $decoded === false ? null : $decoded;
 	}
+
+	public function base64urlEncode(string $value): string
+	{
+		return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
+	}
 }

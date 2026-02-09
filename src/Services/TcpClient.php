@@ -140,7 +140,6 @@ final class TcpClient
 			$responses[] = [
 				'seq' => $responseSeq++,
 				'time' => $requestDoneAt[$index] ?? (microtime(true) - $time),
-				'phase' => 'after-send',
 				'request_index' => $index,
 				'request_base64' => $requestBase64,
 				'response_base64' => $resp !== '' ? base64_encode($resp) : null,
