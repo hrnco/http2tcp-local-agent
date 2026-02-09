@@ -13,6 +13,7 @@ final class AgentApp
 	private string $docsUrl;
 	private string $nonceStorePath;
 	private int $nonceTtl;
+	private bool $multiPairingEnabled;
 	private Services\SignatureService $signatureService;
 	private Services\KeyStore $keyStore;
 	private Services\NonceStore $nonceStore;
@@ -33,6 +34,7 @@ final class AgentApp
 		$this->docsUrl = (string)$this->getEnvValue($env, 'HTTP2TCP_DOCS_URL', 'https://github.com/hrnco/http2tcp-local-agent');
 		$this->nonceStorePath = $this->dataDir . '/nonce_store.json';
 		$this->nonceTtl = (int)$this->getEnvValue($env, 'HTTP2TCP_NONCE_TTL', 3600);
+		$this->multiPairingEnabled = $this->getEnvBool($env, 'HTTP2TCP_MULTI_PAIRING', false);
 		$this->base64Service = new Services\Base64Service();
 		$this->signatureService = new Services\SignatureService($this->base64Service);
 		$this->keyStore = new Services\KeyStore($this->dataDir, $this->publicKeyPath, $this->base64Service);
@@ -56,8 +58,9 @@ final class AgentApp
 		if ($path === '/health') {
 			$this->respondJson(200, [
 				'status' => 'ok',
-				'paired' => is_file($this->publicKeyPath),
-				'public_key_fingerprint' => is_file($this->publicKeyPath) ? $this->keyStore->fingerprint() : null,
+				'paired' => $this->keyStore->hasAnyKey(),
+				'public_key_fingerprint' => $this->keyStore->defaultFingerprint(),
+				'multi_pairing' => $this->multiPairingEnabled,
 			]);
 			return;
 		}
@@ -125,12 +128,18 @@ final class AgentApp
 			return;
 		}
 
-		if (!$this->signatureService->verifySignature($this->publicKeyPath, $payload, $sigBinary)) {
+		$publicKeyPath = $this->keyStore->getPublicKeyPath($this->multiPairingEnabled ? (string)$kid : null);
+		if ($publicKeyPath === null) {
+			$this->respondJson(401, ['status' => 'unpaired', 'error' => 'Agent is not paired.']);
+			return;
+		}
+		if (!$this->signatureService->verifySignature($publicKeyPath, $payload, $sigBinary)) {
 			$this->respondJson(401, ['status' => 'invalid-signature', 'error' => 'Signature verification failed.']);
 			return;
 		}
 
-		$nonceError = $this->nonceStore->checkAndStore((string)$kid, (string)$nonce, (string)$exp, $this->signatureService);
+		$nonceKey = $this->multiPairingEnabled ? (string)$kid : 'default';
+		$nonceError = $this->nonceStore->checkAndStore($nonceKey, (string)$nonce, (string)$exp, $this->signatureService);
 		if ($nonceError !== null) {
 			$status = $nonceError === 'replay' ? 409 : 500;
 			$message = $nonceError === 'replay'
@@ -244,9 +253,28 @@ final class AgentApp
 		return $default;
 	}
 
+	private function getEnvBool(array $fileEnv, string $key, bool $default): bool
+	{
+		$value = $this->getEnvValue($fileEnv, $key, null);
+		if ($value === null) {
+			return $default;
+		}
+		$normalized = strtolower(trim((string)$value));
+		if ($normalized === '') {
+			return $default;
+		}
+		if (in_array($normalized, ['1', 'true', 'yes', 'on'], true)) {
+			return true;
+		}
+		if (in_array($normalized, ['0', 'false', 'no', 'off'], true)) {
+			return false;
+		}
+		return $default;
+	}
+
 	private function handleRoot(): void
 	{
-		$paired = is_file($this->publicKeyPath);
+		$paired = $this->keyStore->hasAnyKey();
 		$docsUrl = $this->docsUrl;
 		$statusText = $paired ? 'paired' : 'not paired';
 		$statusColor = $paired ? '#1a7f37' : '#d1242f';
