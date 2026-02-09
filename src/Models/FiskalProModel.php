@@ -5,6 +5,16 @@ namespace App\Models;
 
 final class FiskalProModel implements ModelInterface
 {
+	public static function responseTimeoutMsForRequest(string $requestBytes): ?int
+	{
+		$hex = bin2hex($requestBytes);
+		if ($hex === '010100074654434c4f534544') {
+            // 90 seconds
+			return 90000;
+		}
+		return null;
+	}
+
 	public static function isResponseComplete(string $responseBytes, string $requestBytes): bool
 	{
 		$hex = bin2hex($responseBytes);
