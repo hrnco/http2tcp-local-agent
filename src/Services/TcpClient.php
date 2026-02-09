@@ -25,6 +25,7 @@ final class TcpClient
 	{
 		$payloadBase64Chunks = is_array($payloadBase64) ? array_values($payloadBase64) : [$payloadBase64];
 		$timeoutMsList = $this->normalizeTimeouts($payloadTimeoutMs, count($payloadBase64Chunks));
+		$modelClass = $this->checkerFactory->resolveModelClass($responseCheckerCode);
 		$payloadChunks = [];
 		foreach ($payloadBase64Chunks as $chunk) {
 			$binary = $this->base64->decode($chunk);
@@ -123,6 +124,12 @@ final class TcpClient
 			// Read any responses produced after this chunk
 			$lastRequestIndex = $index;
 			$timeoutMs = $timeoutMsList[$index] ?? 2000;
+			if ($modelClass !== null && method_exists($modelClass, 'responseTimeoutMsForRequest')) {
+				$override = $modelClass::responseTimeoutMsForRequest($chunk);
+				if (is_int($override) && $override > 0) {
+					$timeoutMs = max($timeoutMs, $override);
+				}
+			}
 			$firstByteSec = max(0.001, $timeoutMs / 1000);
 			$checker = $this->checkerFactory->create($responseCheckerCode);
 			$lastChunkComplete = $drainReads($firstByteSec, 0.3, $checker, $chunk);
