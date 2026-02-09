@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace App\ResponseCheckers;
 
+use App\Models\ModelInterface;
 use App\ResponseCheckerInterface;
 
 final class ResponseCheckerFactory
@@ -24,6 +25,9 @@ final class ResponseCheckerFactory
 		$raw = trim($code);
 		$full = ltrim($raw, '\\');
 		if (class_exists($full)) {
+			if (!is_subclass_of($full, ModelInterface::class)) {
+				return null;
+			}
 			return $full;
 		}
 		$studly = $this->toStudly($raw);
@@ -32,6 +36,9 @@ final class ResponseCheckerFactory
 		}
 		$modelClass = 'App\\Models\\' . $studly . 'Model';
 		if (class_exists($modelClass)) {
+			if (!is_subclass_of($modelClass, ModelInterface::class)) {
+				return null;
+			}
 			return $modelClass;
 		}
 		return null;
