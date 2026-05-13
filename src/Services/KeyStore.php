@@ -8,14 +8,16 @@ final class KeyStore implements KeyStoreInterface
 	private string $dataDir;
 	private string $publicKeyPath;
 	private Base64Service $base64;
+	private Ed25519KeyParser $keyParser;
 	private string $keysDir;
 
-	public function __construct(string $dataDir, string $publicKeyPath, Base64Service $base64)
+	public function __construct(string $dataDir, string $publicKeyPath, Base64Service $base64, Ed25519KeyParser $keyParser)
 	{
 		$this->dataDir = $dataDir;
 		$this->publicKeyPath = $publicKeyPath;
 		$this->keysDir = $this->dataDir . '/keys';
 		$this->base64 = $base64;
+		$this->keyParser = $keyParser;
 	}
 
 	public function ensurePaired(?string $kid, ?string $pub): array
@@ -157,8 +159,11 @@ final class KeyStore implements KeyStoreInterface
 
 		if ($kid !== null) {
 			$raw = $this->base64->base64urlDecode($kid);
-			if ($raw !== null && strlen($raw) === 32) {
-				return $this->ed25519RawToPem($raw);
+			if ($raw !== null) {
+				$pem = $this->keyParser->rawToPem($raw);
+				if ($pem !== null) {
+					return $pem;
+				}
 			}
 		}
 
@@ -169,7 +174,7 @@ final class KeyStore implements KeyStoreInterface
 	{
 		if ($kid !== null) {
 			$raw = $this->base64->base64urlDecode($kid);
-			if ($raw !== null && strlen($raw) === 32) {
+			if ($raw !== null && strlen($raw) === Ed25519KeyParser::RAW_KEY_BYTES) {
 				return $kid;
 			}
 		}
@@ -177,7 +182,7 @@ final class KeyStore implements KeyStoreInterface
 		if ($pub !== null) {
 			$pem = $this->normalizePem($pub);
 			if ($pem !== null) {
-				$raw = $this->pemToEd25519Raw($pem);
+				$raw = $this->keyParser->pemToRaw($pem);
 				if ($raw !== null) {
 					return $this->base64->base64urlEncode($raw);
 				}
@@ -195,44 +200,5 @@ final class KeyStore implements KeyStoreInterface
 	private function sanitizeKid(string $kid): string
 	{
 		return preg_replace('/[^A-Za-z0-9_-]/', '', $kid) ?: 'invalid';
-	}
-
-	private function ed25519RawToPem(string $rawKey): string
-	{
-		$der = hex2bin('302a300506032b6570032100') . $rawKey;
-		$b64 = chunk_split(base64_encode($der), 64, "\n");
-		return "-----BEGIN PUBLIC KEY-----\n" . $b64 . "-----END PUBLIC KEY-----\n";
-	}
-
-	private function pemToEd25519Raw(string $pem): ?string
-	{
-		$decoded = $this->extractDerFromPem($pem);
-		if ($decoded === null || strlen($decoded) < 12 + 32) {
-			return null;
-		}
-		$prefix = hex2bin('302a300506032b6570032100');
-		if ($prefix === false) {
-			return null;
-		}
-		if (substr($decoded, 0, strlen($prefix)) !== $prefix) {
-			return null;
-		}
-		return substr($decoded, strlen($prefix), 32);
-	}
-
-	private function extractDerFromPem(string $pem): ?string
-	{
-		$trimmed = trim($pem);
-		$trimmed = preg_replace('/-----BEGIN PUBLIC KEY-----/', '', $trimmed);
-		$trimmed = preg_replace('/-----END PUBLIC KEY-----/', '', $trimmed);
-		$trimmed = trim((string)$trimmed);
-		if ($trimmed === '') {
-			return null;
-		}
-		$der = base64_decode($trimmed, true);
-		if ($der === false) {
-			return null;
-		}
-		return $der;
 	}
 }

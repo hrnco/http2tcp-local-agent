@@ -36,8 +36,9 @@ final class AgentApp
 		$this->nonceTtl = (int)$this->getEnvValue($env, 'HTTP2TCP_NONCE_TTL', 3600);
 		$this->multiPairingEnabled = $this->getEnvBool($env, 'HTTP2TCP_MULTI_PAIRING', false);
 		$this->base64Service = new Services\Base64Service();
-		$this->signatureService = new Services\SignatureService($this->base64Service);
-		$this->keyStore = new Services\KeyStore($this->dataDir, $this->publicKeyPath, $this->base64Service);
+		$keyParser = new Services\Ed25519KeyParser();
+		$this->signatureService = new Services\SignatureService($this->base64Service, $keyParser);
+		$this->keyStore = new Services\KeyStore($this->dataDir, $this->publicKeyPath, $this->base64Service, $keyParser);
 		$this->nonceStore = new Services\NonceStore($this->nonceStorePath, $this->nonceTtl);
 		$this->instructionValidator = new Services\InstructionValidator($this->readTimeout, $this->base64Service);
 		$this->instructionParser = new Services\InstructionParser($this->base64Service);

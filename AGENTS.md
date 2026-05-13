@@ -37,5 +37,5 @@
 ## Security & Configuration Tips
 - CORS origin is controlled by `HTTP2TCP_CORS_ALLOW_ORIGIN` (set in the Dockerfile by default).
 - The agent expects signed requests and uses TOFU key pairing; keep key material on the server side and never embed private keys in the agent.
-- Runtime signature verification relies on the `openssl` CLI via `shell_exec`; ensure the container includes `openssl` (it is installed in `.docker/Dockerfile`).
+- Runtime signature verification uses libsodium (`sodium_crypto_sign_verify_detached`) — bundled with PHP 8.x, no external binaries required.
 - All configuration keys use the `HTTP2TCP_` prefix (see `.env` for defaults).

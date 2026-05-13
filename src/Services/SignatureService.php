@@ -6,11 +6,14 @@ namespace App\Services;
 final class SignatureService
 {
 	private Base64Service $base64;
+	private Ed25519KeyParser $keyParser;
 
-	public function __construct(Base64Service $base64)
+	public function __construct(Base64Service $base64, Ed25519KeyParser $keyParser)
 	{
 		$this->base64 = $base64;
+		$this->keyParser = $keyParser;
 	}
+
 	public function canonicalPayload(string $signature_uid, string $signature_timestamp, string $signature_metadata, string $instructions, string $kid, string $exp, string $nonce): string
 	{
 		return 'signature_uid=' . rawurlencode($signature_uid)
@@ -29,27 +32,25 @@ final class SignatureService
 
 	public function verifySignature(string $publicKeyPath, string $payload, string $signature): bool
 	{
-		$payloadFile = tempnam(sys_get_temp_dir(), 'h2t_msg_');
-		$sigFile = tempnam(sys_get_temp_dir(), 'h2t_sig_');
-		if ($payloadFile === false || $sigFile === false) {
+		if (strlen($signature) !== SODIUM_CRYPTO_SIGN_BYTES) {
 			return false;
 		}
-
-		file_put_contents($payloadFile, $payload, LOCK_EX);
-		file_put_contents($sigFile, $signature, LOCK_EX);
-
-		$cmd = sprintf(
-			'openssl pkeyutl -verify -rawin -pubin -inkey %s -sigfile %s -in %s 2>/dev/null',
-			escapeshellarg($publicKeyPath),
-			escapeshellarg($sigFile),
-			escapeshellarg($payloadFile)
-		);
-		exec($cmd, $output, $code);
-
-		@unlink($payloadFile);
-		@unlink($sigFile);
-
-		return $code === 0;
+		if (!is_file($publicKeyPath) || !is_readable($publicKeyPath)) {
+			return false;
+		}
+		$pem = file_get_contents($publicKeyPath);
+		if ($pem === false || $pem === '') {
+			return false;
+		}
+		$rawKey = $this->keyParser->pemToRaw($pem);
+		if ($rawKey === null) {
+			return false;
+		}
+		try {
+			return sodium_crypto_sign_verify_detached($signature, $payload, $rawKey);
+		} catch (\SodiumException) {
+			return false;
+		}
 	}
 
 	public function parseExpiryTimestamp(string $exp): ?int
@@ -67,5 +68,4 @@ final class SignatureService
 		}
 		return $timestamp;
 	}
-
 }
