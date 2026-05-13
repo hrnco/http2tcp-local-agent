@@ -24,7 +24,11 @@ final class NonceStore implements NonceStoreInterface
 		$expInt = $signatureService->parseExpiryTimestamp($exp) ?? ($now + $this->ttl);
 		$expiresAt = min($expInt, $now + $this->ttl);
 
-		$fp = @fopen($this->path, 'c+');
+		$dir = dirname($this->path);
+		if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+			return 'store-unavailable';
+		}
+		$fp = fopen($this->path, 'c+');
 		if ($fp === false) {
 			return 'store-unavailable';
 		}

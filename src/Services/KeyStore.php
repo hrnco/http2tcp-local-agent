@@ -22,14 +22,24 @@ final class KeyStore implements KeyStoreInterface
 
 	public function ensurePaired(?string $kid, ?string $pub): array
 	{
-		if (!is_dir($this->dataDir)) {
-			@mkdir($this->dataDir, 0775, true);
+		if (!$this->ensureDir($this->dataDir)) {
+			return [
+				'ok' => false,
+				'status' => 500,
+				'code' => 'storage-error',
+				'error' => 'Unable to create data directory.',
+			];
 		}
 
 		$resolvedKid = $this->normalizeKid($kid, $pub);
 		if ($resolvedKid !== null) {
-			if (!is_dir($this->keysDir)) {
-				@mkdir($this->keysDir, 0775, true);
+			if (!$this->ensureDir($this->keysDir)) {
+				return [
+					'ok' => false,
+					'status' => 500,
+					'code' => 'storage-error',
+					'error' => 'Unable to create keys directory.',
+				];
 			}
 			$perKeyPath = $this->getKeyPathForKid($resolvedKid);
 			if (!is_file($perKeyPath)) {
@@ -43,8 +53,8 @@ final class KeyStore implements KeyStoreInterface
 					];
 				}
 				file_put_contents($perKeyPath, $pem, LOCK_EX);
-				if (!is_file($this->publicKeyPath)) {
-					@copy($perKeyPath, $this->publicKeyPath);
+				if (!is_file($this->publicKeyPath) && !copy($perKeyPath, $this->publicKeyPath)) {
+					error_log(sprintf('http2tcp-agent: failed to copy %s to %s', $perKeyPath, $this->publicKeyPath));
 				}
 				return ['ok' => true];
 			}
@@ -200,5 +210,16 @@ final class KeyStore implements KeyStoreInterface
 	private function sanitizeKid(string $kid): string
 	{
 		return preg_replace('/[^A-Za-z0-9_-]/', '', $kid) ?: 'invalid';
+	}
+
+	private function ensureDir(string $path): bool
+	{
+		if (is_dir($path)) {
+			return true;
+		}
+		if (mkdir($path, 0775, true)) {
+			return true;
+		}
+		return is_dir($path);
 	}
 }
